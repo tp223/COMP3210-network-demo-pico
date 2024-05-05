@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Setup Complete</title>
+</head>
+
+<body>
+    <h1>Setup Complete</h1>
+    <p>Device ID: <!--DEVICE-ID--></p>
+    <p>You will be shortly redirected to the account setup page once your device re-connects to your WiFi</p>
+    <p>If you are not redirected, click <a href="<!--ACCOUNT-SETUP-URL-->">here</a></p>
+    <p>Last connection test: <span id="last-test"></span></p>
+
+    <script>
+        // Get span with ID last-test
+        var lastTest = document.getElementById("last-test");
+        connection_made = false;
+        // Function to check for network connection
+        function checkNetworkConnection() {
+            // Check if the connection has already been made
+            if (connection_made) {
+                return;
+            }
+            // Update last test time
+            lastTest.innerHTML = new Date().toLocaleTimeString();
+            // Check if the browser is online by pinging Google.com
+            fetch("https://www.google.com", {
+                mode: "no-cors"
+            }).then(function (response) {
+                // If the request is successful, redirect to Google.com
+                window.location.href = "<!--ACCOUNT-SETUP-URL-->";
+                connection_made = true;
+            }).catch(function (error) {
+                // If the request fails, do nothing
+            });
+        }
+
+        // Check for network connection every 3 seconds
+        setInterval(checkNetworkConnection, 3000);
+    </script>
+</body>
+
+</html>
