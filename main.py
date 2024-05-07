@@ -10,7 +10,20 @@ import urandom
 import machine
 import ubinascii
 import os
-import requests
+import urequests as requests
+import json
+from bluetooth_helper import advertising_payload
+import bluetooth
+
+# Delay for 5 seconds
+time.sleep(5)
+
+# Define network handlers
+ap_wlan = network.WLAN(network.AP_IF)
+sta_wlan = network.WLAN(network.STA_IF)
+
+ap_wlan.active(False)
+sta_wlan.active(False)
 
 keys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890'
 
@@ -43,17 +56,15 @@ def page_setup_complete(redirect_url, device_id):
 
 def start_ap():
     # Reset WiFi if already active
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(False)
+    ap_wlan.active(False)
     
     # Scan WiFi networks
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
+    sta_wlan.active(True)
     print('Scanning WiFi networks')
-    nets = wlan.scan()
+    nets = sta_wlan.scan()
     for net in nets:
         print(net)
-    wlan.active(False)
+    sta_wlan.active(False)
     print('WiFi Off')
 
     # Get pico serial
@@ -62,16 +73,14 @@ def start_ap():
     # Generate unique SSID
     net_ssid = "Beacon " + my_id[-6:].upper()
     # Start WiFi in AP mode
-    ap = network.WLAN(network.AP_IF)
-    
-    ap.config(essid=net_ssid, security=0)
-    ap.active(True)
+    ap_wlan.config(essid=net_ssid, security=0)
+    ap_wlan.active(True)
 
-    while ap.active() == False:
+    while ap_wlan.active() == False:
         pass
     
     print('WiFi Active')
-    ip = ap.ifconfig()[0]
+    ip = ap_wlan.ifconfig()[0]
     print('IP: ' + ip)
     
     # Socket for web server
@@ -144,11 +153,15 @@ def start_ap():
             conn.send(response)
             conn.close()
             if setup_complete:
+                # Close the socket
+                s.close()
                 # Wait for 5 seconds
                 time.sleep(5)
-                # Disconnect from the AP
-                ap.active(False)
+                # Disable the AP
+                ap_wlan.active(False)
                 print('WiFi Off')
+                # Wait for 5 seconds
+                time.sleep(5)
                 # Break out of the loop
                 break
     except Exception as e:
@@ -167,24 +180,21 @@ def check_setup():
     else:
         print('No setup keys found - device not set up')
         start_ap()
-
-        with open('keys.txt', 'r') as f:
-            setup_key = f.readline().strip()
-            api_key = f.readline().strip()
-        print('(keys.txt) Setup Key = %s' % setup_key)
-        print('(keys.txt) API Key = %s' % api_key)
+        machine.reset()
 
     # Check if the device is set up on the server
     # Send POST request to https://navi.knapstack.co.uk/api/beacons/register
     url = 'https://navi.knapstack.co.uk/api/beacon/register'
     headers = {
-        'Content-Type': 'x-www-form-urlencoded',
+        'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + api_key
     }
     data = {
         'user_key': setup_key,
         'serial_number': ubinascii.hexlify(machine.unique_id()).decode()
     }
+    # Convert data to JSON
+    data = json.dumps(data)
     response = requests.post(url, headers=headers, data=data)
 
     if response.status_code == 200:
@@ -193,6 +203,7 @@ def check_setup():
             print('Error: %s' % response.json()['error'])
         else:
             # Get the api key from the response
+            print(response.json())
             api_key = response.json()['api_key']
             print('API Key = %s' % api_key)
             # Save the API key to a file
@@ -207,7 +218,7 @@ def check_setup():
     # Send GET request to https://navi.knapstack.co.uk/api/beacon/poll-setup
     url = 'https://navi.knapstack.co.uk/api/beacon/poll-setup'
     headers = {
-        'Content-Type': 'x-www-form-urlencoded',
+        'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + api_key
     }
 
@@ -239,43 +250,104 @@ def check_setup():
     if error:
         print('Device setup failed')
         start_ap()
+        machine.reset()
     
     if setup_complete:
         print('Device setup complete')
 
-
-failed_to_connect = True
-
-# Check if wifi.txt exists and attempt to connect to the network
-if 'wifi.txt' in os.listdir():
+def connect_to_wifi():
     with open('wifi.txt', 'r') as f:
         ssid = f.readline().strip()
         password = f.readline().strip()
     print('(wifi.txt) SSID = %s' % ssid)
     print('(wifi.txt) Password = %s' % password)
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(ssid, password)
+    sta_wlan.active(True)
+    sta_wlan.connect(ssid, password)
     # Wait for up to 10 seconds to connect
     start = time.ticks_ms()
-    while not wlan.isconnected():
+    while not sta_wlan.isconnected():
         if time.ticks_diff(time.ticks_ms(), start) > 10000:
             print('Failed to connect to WiFi')
-            break
+            return False
 
-    if wlan.isconnected():
-        failed_to_connect = False
+    if sta_wlan.isconnected():
         print('Connected to WiFi')
-        print('IP: ' + wlan.ifconfig()[0])
+        print('IP: ' + sta_wlan.ifconfig()[0])
+        # Wait for 5 seconds
+        time.sleep(5)
+        return True
 
-if failed_to_connect:
-    print('Failed to connect to WiFi - starting AP')
+def main():
+    # Start BLE
+    ble = bluetooth.BLE()
+    ble.active(True)
+    # Get the MAC address
+    mac = ubinascii.hexlify(ble.config('mac')[1],':').decode().upper()
+    print('BLE MAC: %s' % mac)
+    mac_name = mac.replace(':', '')
+    # Generate the name
+    name = 'NAVI-' + mac_name
+    # Generate the payload
+    payload = advertising_payload(
+        name=name,
+        services=[],
+    )
+    print(payload)
+    print("Starting BLE advertising...")
+    ble.gap_advertise(100, adv_data=payload)
+
+    # Send the MAC address to the server
+    with open('keys.txt', 'r') as f:
+            setup_key = f.readline().strip()
+            api_key = f.readline().strip()
+    print('(keys.txt) Setup Key = %s' % setup_key)
+    print('(keys.txt) API Key = %s' % api_key)
+    print('Sending MAC address to server...')
+    # Send POST request to https://navi.knapstack.co.uk/api/beacon/send-name
+    url = 'https://navi.knapstack.co.uk/api/beacon/send-name'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + api_key
+    }
+    data = {
+        'mac': mac,
+        'name': name
+    }
+    # Convert data to JSON
+    data = json.dumps(data)
+    response = requests.post(url, headers=headers, data=data)
+
+    if response.status_code == 200:
+        # Check if error is in the response
+        if 'error' in response.json():
+            print('Error: %s' % response.json()['error'])
+        else:
+            print('MAC address sent to server')
+    else:
+        print('Failed to send MAC address to server')
+    
+    # Wait for user to stop
+    input("Press Enter to stop...")
+    ble.active(False)
+    print("Bluetooth Disabled")
+
+
+# Check if wifi.txt exists and attempt to connect to the network
+if 'wifi.txt' in os.listdir():
+    if not connect_to_wifi():
+        start_ap()
+        # Restart the device
+        machine.reset()
+else:
+    print('No WiFi credentials found')
     start_ap()
+    # Restart the device
+    machine.reset()
 
 # Check the device setup status
 check_setup()
 
 # Start the main program
 print('Starting main program')
-# main()
+main()
 
