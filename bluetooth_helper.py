@@ -1,7 +1,7 @@
 # Description: BLE advertising payload generator
 # Author: Raspberry Pi Foundation
 # License: BSD-3-Clause
-# Source: https://github.com/raspberrypi/pico-micropython-examples/blob/master/bluetooth/picow_ble_temp_sensor.py
+# Source: https://github.com/raspberrypi/pico-micropython-examples/blob/master/bluetooth/ble_advertising.py
 # Date: 2024-05-07
 
 # Helpers for generating BLE advertising payloads.

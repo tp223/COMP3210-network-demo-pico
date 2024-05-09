@@ -291,6 +291,7 @@ def main():
     payload = advertising_payload(
         name=name,
         services=[],
+        appearance=512
     )
     print(payload)
     print("Starting BLE advertising...")
